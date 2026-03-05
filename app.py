@@ -12,7 +12,14 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 
 # ── Import du bridge corrigé ────────────────────────────────
-from ib_bridge import executer_plan_moons
+# ✅ Par ce bloc :
+try:
+    from ib_bridge import executer_plan_moons
+    IB_DISPONIBLE = True
+except Exception:
+    IB_DISPONIBLE = False
+    def executer_plan_moons(*args, **kwargs):
+        return False
 
 # ── Configuration page ───────────────────────────────────────
 st.set_page_config(
