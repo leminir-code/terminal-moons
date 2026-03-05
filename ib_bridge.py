@@ -155,3 +155,4 @@ def executer_plan_moons(
         if ib.isConnected():
             ib.disconnect()
             log.info("Déconnexion TWS propre.")
+
