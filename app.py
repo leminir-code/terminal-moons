@@ -11,32 +11,29 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 
-# ── Import du bridge corrigé ────────────────────────────────
-# ✅ Par ce bloc :
-try:
-   import requests as req
+# ── Connexion TWS via tunnel Cloudflare ─────────────────────
+import requests as _req
 
-TUNNEL_URL = "https://tales-transcripts-feed-unsigned.trycloudflare.com"
+TUNNEL_URL = "https://acceptable-ordinance-linda-specialized.trycloudflare.com"
 SECRET     = "moons2026"
 
 def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (Long)"):
     try:
-        r = req.post(f"{TUNNEL_URL}/trade", json={
-            "secret": SECRET,
-            "ticker": ticker_str,
-            "qty":    qty,
-            "entry":  entry_px,
-            "stop":   stop_px,
-            "tp":     tp_px,
-            "mode":   mode
-        }, timeout=15)
+        r = _req.post(
+            f"{TUNNEL_URL}/trade",
+            json={
+                "secret": SECRET,
+                "ticker": ticker_str,
+                "qty":    qty,
+                "entry":  entry_px,
+                "stop":   stop_px,
+                "tp":     tp_px,
+                "mode":   mode
+            },
+            timeout=15
+        )
         return r.json().get("succes", False)
     except Exception as e:
-        return False
-    IB_DISPONIBLE = True
-except Exception:
-    IB_DISPONIBLE = False
-    def executer_plan_moons(*args, **kwargs):
         return False
 
 # ── Configuration page ───────────────────────────────────────
