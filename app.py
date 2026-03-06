@@ -16,7 +16,7 @@ from datetime import datetime
 try:
    import requests as req
 
-TUNNEL_URL = "https://ips-comparable-drama-unique.trycloudflare.com"
+TUNNEL_URL = "https://tales-transcripts-feed-unsigned.trycloudflare.com"
 SECRET     = "moons2026"
 
 def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (Long)"):
