@@ -14,7 +14,25 @@ from datetime import datetime
 # ── Import du bridge corrigé ────────────────────────────────
 # ✅ Par ce bloc :
 try:
-    from ib_bridge import executer_plan_moons
+   import requests as req
+
+TUNNEL_URL = "https://ips-comparable-drama-unique.trycloudflare.com"
+SECRET     = "moons2026"
+
+def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (Long)"):
+    try:
+        r = req.post(f"{TUNNEL_URL}/trade", json={
+            "secret": SECRET,
+            "ticker": ticker_str,
+            "qty":    qty,
+            "entry":  entry_px,
+            "stop":   stop_px,
+            "tp":     tp_px,
+            "mode":   mode
+        }, timeout=15)
+        return r.json().get("succes", False)
+    except Exception as e:
+        return False
     IB_DISPONIBLE = True
 except Exception:
     IB_DISPONIBLE = False
