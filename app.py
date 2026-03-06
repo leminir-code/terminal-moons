@@ -14,7 +14,7 @@ from datetime import datetime
 # ── Connexion TWS via tunnel Cloudflare ─────────────────────
 import requests as _req
 
-TUNNEL_URL = "https://acceptable-ordinance-linda-specialized.trycloudflare.com"
+TUNNEL_URL = "https://bat-visitors-cat-refresh.trycloudflare.com"
 SECRET     = "moons2026"
 
 def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (Long)"):
