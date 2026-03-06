@@ -14,7 +14,7 @@ from datetime import datetime
 # ── Connexion TWS via tunnel Cloudflare ─────────────────────
 import requests as _req
 
-TUNNEL_URL = "https://bat-visitors-cat-refresh.trycloudflare.com"
+TUNNEL_URL = "https://acceptable-ordinance-linda-specialized.trycloudflare.com"
 SECRET     = "moons2026"
 
 def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (Long)"):
@@ -44,15 +44,37 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── CSS personnalisé ─────────────────────────────────────────
+# ── CSS Bloomberg Style ──────────────────────────────────────
 st.markdown("""
 <style>
-    .main { background-color: #0a0e1a; }
-    .stMetric { background: #0f1628; border: 1px solid #1e2d4a; border-radius: 8px; padding: 10px; }
-    .status-box { padding: 10px 16px; border-radius: 6px; font-weight: bold; margin: 4px 0; }
-    .alert-danger { background: #2d0a0a; border-left: 4px solid #ff4444; color: #ff8888; }
-    .alert-ok     { background: #0a2d15; border-left: 4px solid #00e676; color: #66ff99; }
-    .alert-warn   { background: #2d1f00; border-left: 4px solid #ffb300; color: #ffd066; }
+    .stApp { background-color: #1e1e1e !important; color: #e0e0e0; }
+    section[data-testid="stSidebar"] { background-color: #252525 !important; border-right: 1px solid #444; }
+    section[data-testid="stSidebar"] * { color: #d0d0d0 !important; }
+    [data-testid="stMetric"] { background: #2a2a2a !important; border: 1px solid #444; border-top: 3px solid #f5a623; border-radius: 4px; padding: 12px 16px; }
+    [data-testid="stMetricLabel"] { color: #999 !important; font-size: 11px !important; text-transform: uppercase; letter-spacing: 1px; }
+    [data-testid="stMetricValue"] { color: #ffffff !important; font-size: 22px !important; font-weight: 700; }
+    h1, h2, h3 { color: #ffffff !important; }
+    h1 { border-bottom: 2px solid #f5a623; padding-bottom: 8px; }
+    thead tr th { background-color: #333 !important; color: #f5a623 !important; font-size: 11px; text-transform: uppercase; }
+    tbody tr:nth-child(even) { background-color: #2a2a2a !important; }
+    td { color: #e0e0e0 !important; font-size: 13px; }
+    .stButton > button[kind="primary"] { background: linear-gradient(135deg, #f5a623, #e8941a) !important; color: #1a1a1a !important; font-weight: 900 !important; border: none !important; border-radius: 4px !important; text-transform: uppercase; letter-spacing: 1px; }
+    .stButton > button[kind="primary"]:hover { background: linear-gradient(135deg, #ffd166, #f5a623) !important; box-shadow: 0 4px 12px rgba(245,166,35,0.4) !important; }
+    .stButton > button:not([kind="primary"]) { background: #333 !important; color: #aaa !important; border: 1px solid #555 !important; border-radius: 4px !important; }
+    .status-box { padding: 10px 16px; border-radius: 3px; font-weight: bold; margin: 4px 0; font-size: 13px; }
+    .alert-danger { background: #2a1515; border-left: 4px solid #e53935; color: #ef9a9a; }
+    .alert-ok { background: #152a1a; border-left: 4px solid #43a047; color: #a5d6a7; }
+    .alert-warn { background: #2a2010; border-left: 4px solid #f5a623; color: #ffe082; }
+    .stTextInput input, .stNumberInput input { background: #333 !important; border: 1px solid #555 !important; color: #fff !important; border-radius: 3px !important; }
+    hr { border-color: #444 !important; }
+    .stTabs [data-baseweb="tab-list"] { background: #2a2a2a !important; border-bottom: 2px solid #f5a623; }
+    .stTabs [data-baseweb="tab"] { color: #aaa !important; font-weight: 600; }
+    .stTabs [aria-selected="true"] { color: #f5a623 !important; }
+    [data-testid="stExpander"] { background: #2a2a2a !important; border: 1px solid #444; border-radius: 4px; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #1e1e1e; }
+    ::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #f5a623; }
 </style>
 """, unsafe_allow_html=True)
 
