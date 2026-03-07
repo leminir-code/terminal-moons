@@ -1,0 +1,26 @@
+name: Agent Moons — Robot Trading
+
+on:
+  schedule:
+    - cron: '*/15 14-21 * * 1-5'  # Toutes les 15 min, 9h30-16h00 EST (= 14h-21h UTC), lun-ven
+  workflow_dispatch:                # Bouton manuel aussi
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Installer dépendances
+        run: pip install yfinance pandas numpy requests pytz
+
+      - name: Lancer le scan
+        env:
+          TUNNEL_URL: ${{ secrets.TUNNEL_URL }}
+          SECRET: ${{ secrets.SECRET }}
+        run: python agent_autonome.py
