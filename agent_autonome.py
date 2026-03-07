@@ -9,7 +9,6 @@
 import time
 import logging
 import sqlite3
-import schedule
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -21,8 +20,8 @@ import os
 # ── Connexion TWS via tunnel Cloudflare ─────────────────
 import requests as _req
 
-TUNNEL_URL = "https://bat-visitors-cat-refresh.trycloudflare.com"
-SECRET     = "moons2026"
+TUNNEL_URL = os.environ.get("TUNNEL_URL", "https://bat-visitors-cat-refresh.trycloudflare.com")
+SECRET     = os.environ.get("SECRET", "moons2026")
 
 def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (Long)"):
     try:
@@ -538,27 +537,21 @@ def demarrer_robot():
     log.info(f"   Entrée    : Bord du nuage Ichimoku")
     log.info(f"   Stop Loss : Autre bord du nuage")
     log.info(f"   Take Profit: Extension Fib 161.8% ou 261.8%")
-    log.info(f"   R:R cible : 1:{RR_MIN}+ (vs 1:2 avant)")
+    log.info(f"   R:R cible : 1:{RR_MIN}+")
     log.info(f"   Watchlist : {len(WATCHLIST)} titres")
     log.info(f"   Capital   : ${CAPITAL:,} | Risque {RISQUE_PAR_TRADE*100:.0f}%/trade")
-    log.info(f"   Positions : max {MAX_POSITIONS} simultanées")
-    log.info(f"   Score min : {SCORE_MIN}/4 Ichimoku")
-    log.info(f"   Scan      : toutes les {SCAN_INTERVAL} min")
     log.info(f"   Heures    : 9h30–16h00 EST (NYSE)")
     log.info("=" * 55)
 
     init_db()
 
-    schedule.every(SCAN_INTERVAL).minutes.do(scanner_et_executer)
-    schedule.every().day.at("16:00").do(rapport_quotidien)
+    # GitHub Actions : un seul scan par exécution (toutes les 15 min via cron)
+    if not est_heures_marche():
+        log.info("🕐 Hors heures NYSE — scan ignoré")
+        return
 
-    # Premier scan immédiat
     scanner_et_executer()
-
-    log.info(f"⏳ Robot actif — prochain scan dans {SCAN_INTERVAL} min")
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+    rapport_quotidien()
 
 if __name__ == "__main__":
     demarrer_robot()
