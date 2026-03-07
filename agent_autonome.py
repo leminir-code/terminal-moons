@@ -44,11 +44,13 @@ def executer_plan_moons(ticker_str, qty, entry_px, stop_px, tp_px, mode="ACHAT (
         return False
 
 # ── Logging ──────────────────────────────────────────────────
+# Dossier de logs adaptatif (Mac local ou GitHub Actions)
+LOG_DIR = os.path.expanduser('~/terminal_moons') if os.path.exists(os.path.expanduser('~/terminal_moons')) else '.'
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler(os.path.expanduser('~/terminal_moons/robot.log')),
+        logging.FileHandler(os.path.join(LOG_DIR, 'robot.log')),
         logging.StreamHandler()
     ]
 )
@@ -86,7 +88,7 @@ FIB_TP_LEVELS = [1.618, 2.618]
 # BASE DE DONNÉES
 # ════════════════════════════════════════════════════════════
 
-DB_PATH = os.path.expanduser('~/terminal_moons/trades.db')
+DB_PATH = os.path.join(LOG_DIR, 'trades.db')
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
