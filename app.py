@@ -112,19 +112,17 @@ with st.sidebar:
 # FONCTIONS TECHNIQUES
 # ════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=900)  # Cache 15 minutes — évite les rate limits yfinance
+@st.cache_data(ttl=900)
 def load_data(ticker: str):
     """Télécharge les données journalières (1an) et 15 min (60 jours)."""
     df_d  = yf.download(ticker, period="1y",  interval="1d",  auto_adjust=True, progress=False)
     df_15 = yf.download(ticker, period="60d", interval="15m", auto_adjust=True, progress=False)
-    # Aplatir les colonnes MultiIndex si présentes
     if isinstance(df_d.columns,  pd.MultiIndex): df_d.columns  = df_d.columns.get_level_values(0)
     if isinstance(df_15.columns, pd.MultiIndex): df_15.columns = df_15.columns.get_level_values(0)
     return df_d, df_15
 
 
 def get_ichimoku(data: pd.DataFrame):
-    """Calcule les composantes Ichimoku sur un DataFrame OHLCV."""
     h9,  l9  = data['High'].rolling(9).max(),  data['Low'].rolling(9).min()
     h26, l26 = data['High'].rolling(26).max(), data['Low'].rolling(26).min()
     h52, l52 = data['High'].rolling(52).max(), data['Low'].rolling(52).min()
@@ -137,7 +135,6 @@ def get_ichimoku(data: pd.DataFrame):
 
 
 def get_ichimoku_score(data: pd.DataFrame, mode_trade: str):
-    """Retourne le score Ichimoku 0-4 et les composantes calculées."""
     if len(data) < 52:
         return 0, None, None, None, None
 
@@ -146,7 +143,6 @@ def get_ichimoku_score(data: pd.DataFrame, mode_trade: str):
     sa_last = sa.iloc[-1]
     sb_last = sb.iloc[-1]
 
-    # Vérification valeurs valides
     if pd.isna(sa_last) or pd.isna(sb_last):
         return 0, sa, sb, tenkan, kijun
 
@@ -155,10 +151,10 @@ def get_ichimoku_score(data: pd.DataFrame, mode_trade: str):
 
     if mode_trade == "ACHAT (Long)":
         conds = [
-            px > max(sa_last, sb_last),       # Au-dessus du nuage
-            sa_last > sb_last,                 # Nuage haussier (SA > SB)
-            tenkan.iloc[-1] > kijun.iloc[-1],  # TK Cross haussier
-            chikou_bull                        # Chikou libre
+            px > max(sa_last, sb_last),
+            sa_last > sb_last,
+            tenkan.iloc[-1] > kijun.iloc[-1],
+            chikou_bull
         ]
     else:
         conds = [
@@ -172,7 +168,6 @@ def get_ichimoku_score(data: pd.DataFrame, mode_trade: str):
 
 
 def find_dynamic_swings(data: pd.DataFrame, mode_trade: str, atr_val: float):
-    """Trouve les 2 points pivots dynamiques pour le calcul Fibonacci."""
     col = 'High' if mode_trade == "ACHAT (Long)" else 'Low'
     price_avg = data['Close'].mean()
     dynamic_dist = max(3, int((atr_val / price_avg) * 500))
@@ -203,8 +198,7 @@ def find_dynamic_swings(data: pd.DataFrame, mode_trade: str, atr_val: float):
     return pd.DataFrame(swings), dynamic_dist
 
 
-def valider_plan(mode_trade, entry, stop, tp, px_actuel, score):
-    """Retourne une liste de validations avec statut OK/WARN/FAIL."""
+def valider_plan(mode_trade, entry, stop, tp, px_actuel, score, qty):
     checks = []
 
     # Check 1 : Score Ichimoku
@@ -243,6 +237,12 @@ def valider_plan(mode_trade, entry, stop, tp, px_actuel, score):
     else:
         checks.append(("❌", "Cohérence niveaux", "Niveaux de prix incohérents — vérifier la direction", "danger"))
 
+    # Check 5 : Quantité non nulle
+    if qty > 0:
+        checks.append(("✅", "Quantité", f"{qty} actions — Capital exposé calculable", "ok"))
+    else:
+        checks.append(("❌", "Quantité", "Quantité = 0 — Risque par action trop faible ou capital insuffisant", "danger"))
+
     return checks
 
 
@@ -255,21 +255,51 @@ st.caption("Analyse Ichimoku × Fibonacci × Exécution TWS Interactive Brokers"
 try:
     # ── Chargement données ───────────────────────────────────
     with st.spinner(f"Chargement des données pour {ticker}..."):
+        # FIX #4 : bouton de rechargement forcé pour contourner le cache en cas d'erreur
+        if st.sidebar.button("🔄 Forcer le rechargement des données"):
+            st.cache_data.clear()
+            st.rerun()
         df_d, df_15 = load_data(ticker)
 
-    # ── Validation données suffisantes ──────────────────────
+    # ── FIX #9 : validation ticker ──────────────────────────
     if df_d.empty or len(df_d) < 52:
-        st.error(f"❌ Données insuffisantes pour **{ticker}** (minimum 52 jours requis). Vérifiez le symbole.")
+        st.error(
+            f"❌ Données insuffisantes ou symbole invalide pour **{ticker}**.\n\n"
+            "**Formats acceptés :** Symboles NYSE/NASDAQ uniquement (ex: NVDA, AAPL, MSFT).\n"
+            "Les symboles étrangers (AAPL.PA), crypto (BTC-USD) ou indices (^SPX) ne sont pas supportés."
+        )
         st.stop()
     if df_15.empty or len(df_15) < 50:
         st.warning(f"⚠️ Données 15 min limitées pour {ticker}. L'analyse reste possible mais moins précise.")
 
+    # ── FIX #7 : détection marché fermé ─────────────────────
+    derniere_bougie_15m = df_15.index[-1]
+    now_utc = pd.Timestamp.now(tz='UTC')
+    # Normaliser la timezone
+    if derniere_bougie_15m.tzinfo is None:
+        derniere_bougie_15m_utc = derniere_bougie_15m.tz_localize('UTC')
+    else:
+        derniere_bougie_15m_utc = derniere_bougie_15m.tz_convert('UTC')
+    age_minutes = (now_utc - derniere_bougie_15m_utc).total_seconds() / 60
+
+    MODE_DONNEES_PERIMEES = age_minutes > 30  # marché fermé ou weekend
+    if MODE_DONNEES_PERIMEES:
+        st.warning(
+            f"⚠️ **Mode données périmées** — Dernière bougie 15 min : "
+            f"`{derniere_bougie_15m.strftime('%Y-%m-%d %H:%M')} UTC` "
+            f"({age_minutes/60:.1f}h). "
+            "Le marché est probablement fermé. Les validations de zone d'entrée sont indicatives uniquement. "
+            "Les niveaux Fibonacci et le plan de trade restent valides pour planification."
+        )
+
     # ── Calculs principaux ───────────────────────────────────
     px_actuel = float(df_15['Close'].iloc[-1])
-    atr_d     = float((df_d['High'] - df_d['Low']).rolling(14).mean().iloc[-1])
-    df_lookback = df_d.tail(lookback_max).copy()
 
-    swings_df, dist_calculee = find_dynamic_swings(df_lookback, mode, atr_d)
+    # FIX #5 : ATR calculé sur la fenêtre lookback, pas sur 1 an complet
+    df_lookback = df_d.tail(lookback_max).copy()
+    atr_lookback = float((df_lookback['High'] - df_lookback['Low']).rolling(14).mean().dropna().iloc[-1])
+
+    swings_df, dist_calculee = find_dynamic_swings(df_lookback, mode, atr_lookback)
 
     if swings_df.empty or len(swings_df) < 2:
         st.error("❌ Impossible de trouver 2 points pivots valides. Augmentez la fenêtre swing.")
@@ -300,6 +330,10 @@ try:
 
     # ── Ichimoku ─────────────────────────────────────────────
     score_trend, sa_d, sb_d, tenkan_d, kijun_d = get_ichimoku_score(df_d, mode)
+
+    # FIX #2 : score 15 min pour détecter divergence avec le journalier
+    score_15m, sa_15_score, sb_15_score, tenkan_15_score, kijun_15_score = get_ichimoku_score(df_15, mode)
+
     trend_label = (
         "HAUSSIER 📈" if score_trend >= 3
         else "BAISSIER 📉" if score_trend <= 1
@@ -311,13 +345,22 @@ try:
         else "#ffb300"
     )
 
-    # ── Quantité (avec sécurité anti-explosion) ──────────────
+    # FIX #3 : calcul quantité avec sécurité qty=0
     dollar_risk_per_share = abs(f_entree - f_stop)
-    min_risk_threshold = px_actuel * 0.005  # 0.5% du prix = seuil minimal
+    min_risk_threshold = px_actuel * 0.005
     if dollar_risk_per_share > min_risk_threshold:
         qty = int((capital * risk_pc) / dollar_risk_per_share)
     else:
         qty = 0
+
+    # ── Choix du TP par l'utilisateur (FIX #8) ──────────────
+    tp_choice = st.sidebar.radio(
+        "🎯 Take Profit cible",
+        ["TP1 — Sécurisé (50%)", "TP2 — Objectif Principal"],
+        help="TP1 = point médian entre entrée et TP2 (sortie partielle sécurisée)\nTP2 = objectif principal Fibonacci"
+    )
+    tp_actif = tp1_secure if tp_choice == "TP1 — Sécurisé (50%)" else tp2_final
+    tp_label  = "TP1" if tp_choice == "TP1 — Sécurisé (50%)" else "TP2"
 
     # ════════════════════════════════════════════════════════
     # AFFICHAGE
@@ -327,14 +370,52 @@ try:
     # ── Header prix + trend ──────────────────────────────────
     col_h1, col_h2 = st.columns([2, 1])
     with col_h1:
+        prix_label = f"{px_actuel:.2f} $"
+        if MODE_DONNEES_PERIMEES:
+            prix_label += " ⏸ (périmé)"
         st.markdown(
-            f"<h1 style='margin:0'>{ticker} <span style='color:#00c9ff'>{px_actuel:.2f} $</span></h1>",
+            f"<h1 style='margin:0'>{ticker} <span style='color:#00c9ff'>{prix_label}</span></h1>",
             unsafe_allow_html=True
         )
         st.markdown(
-            f"<h3 style='color:{trend_color}; margin:0'>Marché {trend_label} — Score Ichimoku : {score_trend}/4</h3>",
+            f"<h3 style='color:{trend_color}; margin:0'>Marché {trend_label} — Score Ichimoku Journalier : {score_trend}/4</h3>",
             unsafe_allow_html=True
         )
+
+        # FIX #2 : avertissement divergence timeframes
+        if score_trend >= 3 and score_15m <= 1:
+            st.markdown(
+                "<div style='background:#2a1010;border-left:4px solid #ff4444;padding:8px 14px;border-radius:3px;margin-top:8px;font-size:13px;color:#ef9a9a'>"
+                f"⚠️ <b>Divergence de timeframe détectée</b> — Score journalier : {score_trend}/4 (HAUSSIER) "
+                f"mais score 15 min : {score_15m}/4 (BAISSIER). "
+                "Attendre l'alignement des deux timeframes avant d'entrer en position."
+                "</div>",
+                unsafe_allow_html=True
+            )
+        elif score_trend <= 1 and score_15m >= 3:
+            st.markdown(
+                "<div style='background:#2a1010;border-left:4px solid #ff4444;padding:8px 14px;border-radius:3px;margin-top:8px;font-size:13px;color:#ef9a9a'>"
+                f"⚠️ <b>Divergence de timeframe détectée</b> — Score journalier : {score_trend}/4 (BAISSIER) "
+                f"mais score 15 min : {score_15m}/4 (HAUSSIER). "
+                "Le graphique 15 min contre-indique la tendance de fond."
+                "</div>",
+                unsafe_allow_html=True
+            )
+        elif score_trend >= 3 and score_15m >= 3:
+            st.markdown(
+                f"<div style='background:#0d2010;border-left:4px solid #00e676;padding:8px 14px;border-radius:3px;margin-top:8px;font-size:13px;color:#a5d6a7'>"
+                f"✅ <b>Alignement timeframes</b> — Journalier {score_trend}/4 et 15 min {score_15m}/4 concordent."
+                f"</div>",
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                f"<div style='background:#252010;border-left:4px solid #ffb300;padding:8px 14px;border-radius:3px;margin-top:8px;font-size:13px;color:#ffe082'>"
+                f"⚠️ Score journalier : {score_trend}/4 · Score 15 min : {score_15m}/4 — Alignement partiel."
+                f"</div>",
+                unsafe_allow_html=True
+            )
+
     with col_h2:
         direction_color = "#00e676" if mode == "ACHAT (Long)" else "#ff4444"
         st.markdown(
@@ -343,6 +424,7 @@ try:
             f"<div style='font-size:24px; font-weight:900; color:{direction_color}'>"
             f"{'▲ LONG' if mode == 'ACHAT (Long)' else '▼ SHORT'}</div>"
             f"<div style='color:#888; font-size:11px'>Risque {risk_pc*100:.1f}% · ${capital*risk_pc:.0f} max</div>"
+            f"<div style='color:#888; font-size:11px'>TP actif : {tp_label}</div>"
             f"</div>",
             unsafe_allow_html=True
         )
@@ -353,9 +435,9 @@ try:
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("🎯 T1 — Pivot",      swings_df.iloc[0]['Date'], f"{t1_pivot:.2f} $")
     c2.metric("📥 C2 — Entrée",     f"{f_entree:.2f} $",       delta=f"{((f_entree/px_actuel-1)*100):+.1f}% vs prix actuel")
-    c3.metric("✅ TP2 — Objectif",  f"{tp2_final:.2f} $",      delta=f"+{abs(tp2_final-f_entree):.2f} $")
+    c3.metric(f"✅ {tp_label} — Objectif", f"{tp_actif:.2f} $", delta=f"+{abs(tp_actif-f_entree):.2f} $")
     c4.metric("🛑 Stop Loss",       f"{f_stop:.2f} $",         delta=f"-{abs(f_stop-f_entree):.2f} $", delta_color="inverse")
-    c5.metric("📦 Quantité",        f"{qty} actions",          f"${qty * f_entree:.0f} exposé")
+    c5.metric("📦 Quantité",        f"{qty} actions",          f"${qty * f_entree:.0f} exposé" if qty > 0 else "⛔ Insuffisant")
 
     st.divider()
 
@@ -381,20 +463,64 @@ try:
                     "Objectif principal",
                     "Extension — marché très fort",
                     "Invalidation du scénario"
+                ],
+                "Actif pour TWS": [
+                    "—", "✅ Entrée", "—",
+                    "✅ si TP1 sélectionné",
+                    "✅ si TP2 sélectionné",
+                    "—", "✅ Stop"
                 ]
             })
             st.dataframe(plan_df, hide_index=True, use_container_width=True)
 
+            # FIX #1 : affichage des 2 pivots détectés + explication
+            st.markdown("---")
+            st.markdown("**🔍 Pivots détectés automatiquement**")
+            st.caption(
+                f"T1 (pivot actif) = `{t1_pivot:.2f}$` · "
+                f"2ème pivot détecté = `{float(swings_df.iloc[1]['Prix']):.2f}$` (affiché sur le graphique, non utilisé dans le calcul Fibonacci)"
+            )
+            st.dataframe(swings_df, hide_index=True, use_container_width=True)
+
+            # FIX #1 : pivot manuel optionnel
+            st.markdown("**✏️ Remplacer T1 par un pivot manuel**")
+            use_manual_pivot = st.checkbox("Utiliser un pivot manuel comme T1")
+            if use_manual_pivot:
+                pivot_manuel = st.number_input(
+                    "T1 Manuel ($)",
+                    value=float(t1_pivot),
+                    step=0.01,
+                    format="%.2f",
+                    help="Entrez le prix du sommet (Long) ou creux (Short) que vous souhaitez utiliser comme T1"
+                )
+                diff_manuel = abs(pivot_manuel - base_ref)
+                if mode == "ACHAT (Long)":
+                    f_entree  = pivot_manuel - (0.618 * diff_manuel)
+                    f_soldes  = pivot_manuel - (0.786 * diff_manuel)
+                    f_stop    = pivot_manuel - (0.950 * diff_manuel)
+                    tp2_final = pivot_manuel + (0.618 * diff_manuel)
+                    tp3_max   = pivot_manuel + (1.618 * diff_manuel)
+                else:
+                    f_entree  = pivot_manuel + (0.618 * diff_manuel)
+                    f_soldes  = pivot_manuel + (0.786 * diff_manuel)
+                    f_stop    = pivot_manuel + (0.950 * diff_manuel)
+                    tp2_final = pivot_manuel - (0.618 * diff_manuel)
+                    tp3_max   = pivot_manuel - (1.618 * diff_manuel)
+                tp1_secure = (f_entree + tp2_final) / 2
+                tp_actif   = tp1_secure if tp_choice == "TP1 — Sécurisé (50%)" else tp2_final
+                t1_pivot   = pivot_manuel
+                st.success(f"✅ Pivot manuel T1 = {pivot_manuel:.2f}$ — Niveaux Fibonacci recalculés.")
+
         with col_plan2:
             st.markdown("**Statistiques du Trade**")
             risk_dollars  = abs(f_entree - f_stop)
-            rew_dollars   = abs(tp2_final - f_entree)
+            rew_dollars   = abs(tp_actif - f_entree)
             rr_ratio      = rew_dollars / risk_dollars if risk_dollars > 0 else 0
             max_loss_trade = qty * risk_dollars
             max_gain_trade = qty * rew_dollars
 
             stats_df = pd.DataFrame({
-                "Paramètre": ["Capital risqué", "Gain potentiel TP2", "Ratio R:R", "Perte max ($)", "Gain max TP2 ($)", "Gain max TP3 ($)", "Filtre Swing (jours)"],
+                "Paramètre": ["Capital risqué", f"Gain potentiel {tp_label}", "Ratio R:R", "Perte max ($)", f"Gain max {tp_label} ($)", "Gain max TP3 ($)", "Filtre Swing (jours)", "ATR fenêtre"],
                 "Valeur": [
                     f"${capital * risk_pc:.2f} ({risk_pc*100:.1f}%)",
                     f"${max_gain_trade:.2f}",
@@ -402,14 +528,15 @@ try:
                     f"-${max_loss_trade:.2f}",
                     f"+${max_gain_trade:.2f}",
                     f"+${qty * abs(tp3_max - f_entree):.2f}",
-                    f"{dist_calculee} jours"
+                    f"{dist_calculee} jours",
+                    f"${atr_lookback:.2f} (sur {lookback_max}j)"  # FIX #5 visible
                 ]
             })
             st.dataframe(stats_df, hide_index=True, use_container_width=True)
 
     # ── Validation pré-exécution ─────────────────────────────
     st.markdown("### 🔍 Validation Pré-Exécution")
-    checks = valider_plan(mode, f_entree, f_stop, tp2_final, px_actuel, score_trend)
+    checks = valider_plan(mode, f_entree, f_stop, tp_actif, px_actuel, score_trend, qty)  # FIX #3
     nb_fail = sum(1 for c in checks if c[3] == "danger")
     nb_warn = sum(1 for c in checks if c[3] == "warn")
 
@@ -433,16 +560,29 @@ try:
             st.dataframe(swings_df, hide_index=True, use_container_width=True)
 
     with col_btn2:
-        # Désactiver le bouton si validations critiques échouées
         btn_disabled = nb_fail > 0
         btn_label = (
-            f"🚀 ENVOYER LE PLAN À TWS ({qty} × {ticker} @ {f_entree:.2f}$)"
+            f"🚀 ENVOYER LE PLAN À TWS ({qty} × {ticker} @ {f_entree:.2f}$ → {tp_label} {tp_actif:.2f}$)"
             if not btn_disabled
             else f"⛔ EXÉCUTION BLOQUÉE — {nb_fail} validation(s) échouée(s)"
         )
 
         if nb_warn > 0 and not btn_disabled:
             st.warning(f"⚠️ {nb_warn} avertissement(s) — vous pouvez continuer mais vérifiez les conditions de marché.")
+
+        # FIX #6 : récapitulatif mode avant envoi
+        if not btn_disabled:
+            dir_color = "#00e676" if mode == "ACHAT (Long)" else "#ff4444"
+            dir_icon  = "▲" if mode == "ACHAT (Long)" else "▼"
+            st.markdown(
+                f"<div style='background:{dir_color}15;border:1px solid {dir_color}44;border-radius:4px;"
+                f"padding:8px 12px;font-size:12px;margin-bottom:8px;'>"
+                f"<b style='color:{dir_color}'>{dir_icon} {mode}</b> · "
+                f"Entrée <b>{f_entree:.2f}$</b> · Stop <b>{f_stop:.2f}$</b> · "
+                f"{tp_label} <b>{tp_actif:.2f}$</b> · Qté <b>{qty}</b> · R:R <b>1:{abs(tp_actif-f_entree)/abs(f_entree-f_stop):.2f}</b>"
+                f"</div>",
+                unsafe_allow_html=True
+            )
 
         execute_btn = st.button(
             btn_label,
@@ -451,39 +591,52 @@ try:
         )
 
         if execute_btn:
-            with st.spinner(f"Connexion à TWS et envoi des ordres pour {ticker}..."):
-                succes = executer_plan_moons(
-                    ticker_str=ticker,
-                    qty=qty,
-                    entry_px=f_entree,
-                    stop_px=f_stop,
-                    tp_px=tp2_final,
-                    mode=mode          # ← CORRIGÉ : passage du mode LONG/SHORT
+            # FIX #6 : vérification finale cohérence mode/niveaux avant envoi
+            coherent = (
+                (mode == "ACHAT (Long)"  and f_stop < f_entree < tp_actif) or
+                (mode == "VENTE (Short)" and f_stop > f_entree > tp_actif)
+            )
+            if not coherent:
+                st.error(
+                    f"⛔ Incohérence détectée juste avant l'envoi : les niveaux ne correspondent pas "
+                    f"à la direction {mode}. Ordre annulé par sécurité."
                 )
-
-            if succes:
-                st.success(f"✅ Bracket Order envoyé avec succès !")
-                st.markdown(f"""
-                | Paramètre | Valeur |
-                |---|---|
-                | Titre | **{ticker}** |
-                | Direction | **{mode}** |
-                | Quantité | **{qty} actions** |
-                | Entrée (C2) | **{f_entree:.2f} $** |
-                | Stop Loss | **{f_stop:.2f} $** |
-                | Take Profit (TP2) | **{tp2_final:.2f} $** |
-                | Capital exposé | **${qty * f_entree:.2f}** |
-                """)
-                st.balloons()
+            elif qty == 0:
+                st.error("⛔ Quantité = 0. Ordre non envoyé.")
             else:
-                st.error("❌ Échec de l'envoi à TWS.")
-                st.markdown("""
-                **Checklist de dépannage :**
-                - TWS est-il ouvert et connecté ?
-                - Le port 7497 est-il activé dans TWS > Global Configuration > API > Settings ?
-                - Êtes-vous bien sur un compte **paper trading** (commence par 'DU') ?
-                - L'option *Enable ActiveX and Socket Clients* est-elle cochée dans TWS ?
-                """)
+                with st.spinner(f"Connexion à TWS et envoi des ordres pour {ticker}..."):
+                    succes = executer_plan_moons(
+                        ticker_str=ticker,
+                        qty=qty,
+                        entry_px=f_entree,
+                        stop_px=f_stop,
+                        tp_px=tp_actif,
+                        mode=mode
+                    )
+
+                if succes:
+                    st.success(f"✅ Bracket Order envoyé avec succès !")
+                    st.markdown(f"""
+                    | Paramètre | Valeur |
+                    |---|---|
+                    | Titre | **{ticker}** |
+                    | Direction | **{mode}** |
+                    | Quantité | **{qty} actions** |
+                    | Entrée (C2) | **{f_entree:.2f} $** |
+                    | Stop Loss | **{f_stop:.2f} $** |
+                    | {tp_label} | **{tp_actif:.2f} $** |
+                    | Capital exposé | **${qty * f_entree:.2f}** |
+                    """)
+                    st.balloons()
+                else:
+                    st.error("❌ Échec de l'envoi à TWS.")
+                    st.markdown("""
+                    **Checklist de dépannage :**
+                    - TWS est-il ouvert et connecté ?
+                    - Le port 7497 est-il activé dans TWS > Global Configuration > API > Settings ?
+                    - Êtes-vous bien sur un compte **paper trading** (commence par 'DU') ?
+                    - L'option *Enable ActiveX and Socket Clients* est-elle cochée dans TWS ?
+                    """)
 
     # ════════════════════════════════════════════════════════
     # GRAPHIQUE PRINCIPAL
@@ -493,7 +646,6 @@ try:
 
     df_plot = df_15.tail(600).copy()
 
-    # Calcul Ichimoku sur 15 min
     _, sa_15, sb_15, tenkan_15, kijun_15 = get_ichimoku_score(df_15, mode)
 
     fig = make_subplots(
@@ -504,7 +656,7 @@ try:
         subplot_titles=[f"{ticker} — 15 min", "Volume"]
     )
 
-    # ── Bougies ──────────────────────────────────────────────
+    # Bougies
     fig.add_trace(go.Candlestick(
         x=df_plot.index,
         open=df_plot['Open'], high=df_plot['High'],
@@ -514,12 +666,8 @@ try:
         decreasing_line_color='#ff4444',
     ), row=1, col=1)
 
-    # ── Nuage Ichimoku 15 min ─────────────────────────────────
+    # Nuage Ichimoku 15 min
     if sa_15 is not None and sb_15 is not None:
-        # Remplissage du nuage selon la direction
-        cloud_color_a = 'rgba(0,230,118,0.08)'
-        cloud_color_b = 'rgba(255,68,68,0.08)'
-
         fig.add_trace(go.Scatter(
             x=df_15.index, y=sa_15,
             line=dict(color='rgba(0,230,118,0.4)', width=1),
@@ -533,7 +681,6 @@ try:
             name='Senkou B', showlegend=True
         ), row=1, col=1)
 
-    # Tenkan & Kijun
     if tenkan_15 is not None:
         fig.add_trace(go.Scatter(
             x=df_15.index, y=tenkan_15,
@@ -547,29 +694,30 @@ try:
             name='Kijun-sen'
         ), row=1, col=1)
 
-    # ── Lignes Fibonacci ─────────────────────────────────────
+    # Lignes Fibonacci avec TP actif mis en évidence
     levels = {
-        "T1 Pivot": (t1_pivot,   "white",   "dash"),
-        "C2 Entrée": (f_entree,  "#00c9ff", "dot"),
-        "SOLDES 78.6%": (f_soldes, "#ffd700", "dot"),
-        "TP1 50%":   (tp1_secure, "#ffa500", "dot"),
-        "TP2":       (tp2_final,  "#00e676", "dashdot"),
-        "TP3 161.8%":(tp3_max,   "#00ffff", "dot"),
-        "STOP":      (f_stop,    "#ff4444", "dash"),
+        "T1 Pivot":     (t1_pivot,   "white",   "dash",    1.2),
+        "C2 Entrée":    (f_entree,   "#00c9ff", "dot",     1.5),
+        "SOLDES 78.6%": (f_soldes,   "#ffd700", "dot",     1.0),
+        "TP1 50%":      (tp1_secure, "#ffa500", "dot",     1.2 if tp_choice.startswith("TP1") else 0.7),
+        "TP2":          (tp2_final,  "#00e676", "dashdot", 2.0 if tp_choice.startswith("TP2") else 0.7),
+        "TP3 161.8%":   (tp3_max,    "#00ffff", "dot",     0.8),
+        "STOP":         (f_stop,     "#ff4444", "dash",    1.5),
     }
-    for lbl, (val, color, dash) in levels.items():
+    for lbl, (val, color, dash, width) in levels.items():
+        active_marker = " ◀ ACTIF" if (lbl == "TP1 50%" and tp_choice.startswith("TP1")) or (lbl == "TP2" and tp_choice.startswith("TP2")) else ""
         fig.add_hline(
             y=val,
-            line=dict(color=color, dash=dash, width=1.2),
-            annotation_text=f"  {lbl}: {val:.2f}$",
+            line=dict(color=color, dash=dash, width=width),
+            annotation_text=f"  {lbl}{active_marker}: {val:.2f}$",
             annotation_position="top left",
             annotation_font=dict(color=color, size=10),
             row=1, col=1
         )
 
-    # ── Lignes verticales pivots ─────────────────────────────
-    for _, row in swings_df.iterrows():
-        swing_dt = pd.to_datetime(row['Date'])
+    # Lignes verticales pivots (les 2)
+    for _, row_s in swings_df.iterrows():
+        swing_dt = pd.to_datetime(row_s['Date'])
         if hasattr(df_plot.index, 'tz') and df_plot.index.tz is not None:
             swing_dt = swing_dt.tz_localize(df_plot.index.tz) if swing_dt.tzinfo is None else swing_dt.tz_convert(df_plot.index.tz)
         if swing_dt >= df_plot.index.min():
@@ -579,20 +727,17 @@ try:
                 row=1, col=1
             )
 
-    # ── Volume ───────────────────────────────────────────────
+    # Volume
     volume_colors = [
         '#00e676' if c >= o else '#ff4444'
         for c, o in zip(df_plot['Close'], df_plot['Open'])
     ]
     fig.add_trace(go.Bar(
-        x=df_plot.index,
-        y=df_plot['Volume'],
-        marker_color=volume_colors,
-        marker_opacity=0.6,
+        x=df_plot.index, y=df_plot['Volume'],
+        marker_color=volume_colors, marker_opacity=0.6,
         name='Volume', showlegend=False
     ), row=2, col=1)
 
-    # ── Mise en forme ─────────────────────────────────────────
     fig.update_layout(
         template="plotly_dark",
         height=820,
@@ -626,4 +771,4 @@ try:
 except Exception as e:
     st.error(f"❌ Erreur inattendue : {e}")
     st.exception(e)
-    st.info("💡 Vérifiez le symbole entré et votre connexion internet.")
+    st.info("💡 Vérifiez le symbole entré (NYSE/NASDAQ uniquement) et votre connexion internet.")
