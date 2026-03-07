@@ -2,8 +2,8 @@ name: Agent Moons — Robot Trading
 
 on:
   schedule:
-    - cron: '*/15 14-21 * * 1-5'  # Toutes les 15 min, 9h30-16h00 EST (= 14h-21h UTC), lun-ven
-  workflow_dispatch:                # Bouton manuel aussi
+    - cron: '*/15 14-21 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   scan:
@@ -17,7 +17,7 @@ jobs:
           python-version: '3.11'
 
       - name: Installer dépendances
-        run: pip install yfinance pandas numpy requests pytz
+        run: pip install yfinance pandas numpy requests pytz schedule
 
       - name: Lancer le scan
         env:
